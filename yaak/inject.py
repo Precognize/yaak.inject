@@ -112,9 +112,9 @@ the injection afterwards:
 import functools
 import inspect
 import threading
+from typing import Type, Optional
 
-
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 class Scope(object):
@@ -159,6 +159,7 @@ _ApplicationContextLock = threading.Lock()
 class ScopeManager(threading.local):
     """Manages scope contexts where we store the instances to be used for the
     injection."""
+
     # We use a thread-local storage because, when we enter/exit a scope, it is
     # only for the current thread. However, the context dictionaries may be
     # shared between the threads, so a context lock may be necessary to avoid
@@ -335,6 +336,14 @@ class FeatureProvider(object):
         """Unregister all features."""
         self._feature_descriptors = {}
 
+    def provide_class(self, factory: Type, feature: Optional[Type] = None, scope=Scope.Thread):
+        if feature is None:
+            feature_name = factory.__name__
+        else:
+            feature_name = feature.__name__
+
+        return self.provide(feature_name, factory=factory, scope=scope)
+
     def provide(self, feature, factory=None, scope=Scope.Thread):
         """Provide a *factory* that build (scoped) instances of the *feature*.
         By default, the scope of the *feature* instance is
@@ -343,6 +352,7 @@ class FeatureProvider(object):
 
         Note that you can change the factory for a feature by providing the
         same feature again."""
+
         # FIXME: remove the existing instances from the scopes?
         # decorator support
         def decorator(factory):
@@ -353,6 +363,9 @@ class FeatureProvider(object):
             return decorator
         else:
             decorator(factory)
+
+    def provides(self, feature):
+        return feature in self._feature_descriptors
 
     def get(self, feature):
         """Retrieve a (scoped) feature instance. Either find the instance in
@@ -503,7 +516,7 @@ def bind(func=None, **frozen_args):
     def resolve(value):
         return value() if callable(value) else value
 
-    args_names = inspect.getargspec(func)[0]
+    args_names = inspect.getfullargspec(func).args
     frozen_args = sorted((args_names.index(arg), value)
                          for arg, value in frozen_args.items())
 

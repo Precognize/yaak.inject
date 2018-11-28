@@ -2,17 +2,18 @@
 # Copyright (c) 2011-2012 Sylvain Prat. This program is open-source software,
 # and may be redistributed under the terms of the MIT license. See the
 # LICENSE file in this distribution for details.
-
 import unittest
 import threading
 import sys
 
+from auto_inject import AutoInject
 from yaak import inject
 
 
 def run_in_thread(func, *args, **kwargs):
     """Utility function that runs a function in a separate thread and
     returns its result."""
+
     def target():
         try:
             target.exc_info = None
@@ -25,7 +26,7 @@ def run_in_thread(func, *args, **kwargs):
     thread.join()
 
     if target.exc_info:
-        raise target.exc_info[0], target.exc_info[1], target.exc_info[2]
+        raise target.exc_info[0](target.exc_info[1]).with_traceback(target.exc_info[2])
     else:
         return target.result
 
@@ -141,6 +142,7 @@ class TestFeatureProvider(unittest.TestCase):
         def create_none():
             create_none.calls += 1
             return None
+
         create_none.calls = 0
         self.provider.provide('test', create_none)
         self.assertEquals(None, self.provider.get('test'))
@@ -239,6 +241,7 @@ class TestAttr(unittest.TestCase):
         try:
             class AnotherInjected(object):
                 service = inject.Attr('service')
+
             singleton = object()
             inject.provide('service', lambda: singleton)
             o = AnotherInjected()
@@ -264,7 +267,8 @@ class TestAttr(unittest.TestCase):
         o = self.Injected()
         instance1 = o.service
         instance2 = o.service
-        self.assert_(not instance1 is instance2)
+
+        self.assertIsNot(instance1, instance2)
 
     def test_missing_feature(self):
         o = self.Injected()
@@ -274,6 +278,7 @@ class TestAttr(unittest.TestCase):
     def test_inheritance(self):
         class Inherited(self.Injected):
             pass
+
         singleton = object()
         self.provider.provide('service', lambda: singleton)
         o = Inherited()
@@ -296,6 +301,7 @@ class TestParam(unittest.TestCase):
         class Mirror(object):
             def reflect(self, a):
                 return a
+
         self.provider = inject.FeatureProvider(inject.ScopeManager())
         self.provider.provide('IMirror', Mirror)
         self.inject_mirror = inject.Param(self.provider, mirror='IMirror')
@@ -306,6 +312,77 @@ class TestParam(unittest.TestCase):
             return mirror.reflect('test')
 
         self.assertEquals('test', func())
+
+    def test_auto_inject(self):
+        class InjectedMirror:
+            def reflect(self, a):
+                return a
+
+        self.provider.provide('mirror_service', InjectedMirror)
+
+        class MirrorWithTypeHint:
+            @AutoInject(provider=self.provider)
+            def __init__(self, mirror_service: InjectedMirror, other=None):
+                self.injected = mirror_service
+                self.other = other
+
+        mirror = MirrorWithTypeHint()
+
+        self.assertEqual(1, mirror.injected.reflect(1))
+
+    def test_auto_inject_by_base_type(self):
+        class BaseMirror:
+            def reflect(self, a):
+                raise NotImplementedError()
+
+        class InjectedMirror(BaseMirror):
+            def reflect(self, a):
+                return a
+
+        self.provider.provide_class(InjectedMirror, BaseMirror)
+
+        class MirrorWithTypeHint:
+            @AutoInject(provider=self.provider)
+            def __init__(self, mirror_service: BaseMirror, other=None):
+                self.injected = mirror_service
+                self.other = other
+
+        mirror = MirrorWithTypeHint()
+
+        self.assertEqual(1, mirror.injected.reflect(1))
+
+    def test_auto_inject_by_type(self):
+        class InjectedMirror:
+            def reflect(self, a):
+                return a
+
+        self.provider.provide_class(InjectedMirror)
+
+        class MirrorWithTypeHint:
+            @AutoInject(provider=self.provider)
+            def __init__(self, mirror_service: InjectedMirror, other=None):
+                self.injected = mirror_service
+                self.other = other
+
+        mirror = MirrorWithTypeHint()
+
+        self.assertEqual(1, mirror.injected.reflect(1))
+
+    def test_param_inject_with_type_hint(self):
+        class InjectedMirror:
+            def reflect(self, a):
+                return a
+
+        self.provider.provide('mirror', InjectedMirror)
+
+        class MirrorWithTypeHint:
+            @inject.Param(provider=self.provider, injected='mirror')
+            def __init__(self, injected: InjectedMirror):
+                self.injected = injected
+
+        mirror = MirrorWithTypeHint()
+
+        self.assertEqual(1, mirror.injected.reflect(1))
 
     def test_one_normal_parameter_then_one_injected(self):
         @self.inject_mirror
@@ -386,27 +463,39 @@ class TestParam(unittest.TestCase):
 
 
 class TestBind(unittest.TestCase):
+
+    def test_bind_method_with_type_hints(self):
+        def func(a: int, b: float):
+            return a + 2 * b
+
+        func = inject.bind(func, a=1)
+        self.assertEqual(5, func(2))
+
     def test_bind_first_arg_with_positional_second_arg(self):
         def func(a, b):
             return a + 2 * b
+
         func = inject.bind(func, a=1)
         self.assertEqual(5, func(2))
 
     def test_bind_first_arg_with_default_second_arg(self):
         def func(a, b=5):
             return a + 2 * b
+
         func = inject.bind(func, a=1)
         self.assertEqual(11, func())
 
     def test_bind_first_arg_with_keyword_second_arg(self):
         def func(a, b):
             return a + 2 * b
+
         func = inject.bind(func, a=1)
         self.assertEqual(7, func(b=3))
 
     def test_we_cant_override_a_bound_argument(self):
         def func(a, b):
             return a + 2 * b
+
         func = inject.bind(func, a=1)
         self.assertRaises(TypeError,
                           func, a=2, b=3)
@@ -414,6 +503,7 @@ class TestBind(unittest.TestCase):
     def test_fail_if_we_miss_an_argument(self):
         def func(a, b):
             return a + 2 * b
+
         func = inject.bind(func, a=1)
         self.assertRaises(TypeError,
                           func)
@@ -421,6 +511,7 @@ class TestBind(unittest.TestCase):
     def test_fail_when_passing_a_normal_argument_twice(self):
         def func(a, b):
             return a + 2 * b
+
         func = inject.bind(func, a=1)
         self.assertRaises(TypeError,
                           func, 3, b=3)
@@ -428,24 +519,28 @@ class TestBind(unittest.TestCase):
     def test_bind_last_arg(self):
         def func(a, b):
             return a + 2 * b
+
         func = inject.bind(func, b=1)
         self.assertEqual(4, func(2))
 
     def test_bind_middle_arg(self):
         def func(a, b, c):
             return a + 2 * b + 3 * c
+
         func = inject.bind(func, b=1)
         self.assertEqual(13, func(2, 3))
 
     def test_bind_out_of_order_args(self):
         def func(e, d, c, b, a):
             return (e, d, c, b, a)
+
         func = inject.bind(func, a=5, b=4, c=3, d=2)
         self.assertEqual((1, 2, 3, 4, 5), func(1))
 
     def test_bind_callable(self):
         def func(a, b):
             return a + 2 * b
+
         func = inject.bind(func, b=lambda: 1)
         self.assertEqual(4, func(2))
 
@@ -459,6 +554,7 @@ class TestBind(unittest.TestCase):
     def test_bind_with_keyword_args(self):
         def func(a, **kwargs):
             return a, kwargs
+
         func = inject.bind(func, a=1)
         self.assertEquals((1, dict(b=1, c=1)), func(b=1, c=1))
 
