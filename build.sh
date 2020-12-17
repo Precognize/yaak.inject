@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -eux
+
+SCRIPT=$(realpath $0)
+SCRIPT_PATH=$(dirname $SCRIPT)
+
+DOCKER_BUILDKIT=1
+export DOCKER_BUILDKIT
+
+TEAMCITY_VERSION=${TEAMCITY_VERSION:-}
+
+PRECOGNIZE_DOCKER_PREFIX=${PRECOGNIZE_DOCKER_PREFIX:-""}
+PRECOGNIZE_SOURCE_PATH=${PRECOGNIZE_SOURCE_PATH:-${SCRIPT_PATH}}
+PRECOGNIZE_PYPI_DOMAIN_NAME=${PRECOGNIZE_PYPI_DOMAIN_NAME:-pypi.precog.local}
+PRECOGNIZE_PYPI_IP=${PRECOGNIZE_PYPI_IP:-127.0.0.1}
+
+PRECOGNIZE_BASE_IMAGE=${PRECOGNIZE_BASE_IMAGE:-${PRECOGNIZE_DOCKER_PREFIX}precognize/algorithms-base-test:latest}
+
+PRECOGNIZE_TEST_CONTAINER=precognize/python:latest
+
+PRECOGNIZE_UID_GID=$(id -u):$(id -g)
+
+rm -f "${PRECOGNIZE_SOURCE_PATH}/dist/"*.whl
+
+if [[ "${PRECOGNIZE_BASE_IMAGE}" == "docker.precog.local"* ]]; then
+  docker pull ${PRECOGNIZE_BASE_IMAGE}
+fi
+
+docker run \
+  -u "${PRECOGNIZE_UID_GID}" \
+  -v "${PRECOGNIZE_SOURCE_PATH}":/source \
+  -w /source \
+  ${PRECOGNIZE_TEST_CONTAINER} \
+  python setup.py bdist_wheel
